@@ -100,12 +100,12 @@ module DSP48E2 #(
   output CARRYCASCOUT,
   output [3:0] CARRYOUT,
   output MULTSIGNOUT,
-  output OVERFLOW_renamed,
+  output OVERFLOW,
   output [47:0] P,
   output PATTERNBDETECT,
   output PATTERNDETECT,
   output [47:0] PCOUT,
-  output UNDERFLOW_renamed,
+  output UNDERFLOW,
   output [7:0] XOROUT,
 
   input [29:0] A,
@@ -1672,10 +1672,10 @@ end
 //--####################################################################
 //--#####                    Underflow / Overflow                  #####
 //--####################################################################
-    assign OVERFLOW_renamed  = ((USE_PATTERN_DETECT_BIN == USE_PATTERN_DETECT_PATDET) ||
+    assign OVERFLOW  = ((USE_PATTERN_DETECT_BIN == USE_PATTERN_DETECT_PATDET) ||
                             (PREG_BIN == 1'b1)) ?
                             ~pdet_o_mux && ~pdetb_o_mux && overflow_data : 1'bx;
-    assign UNDERFLOW_renamed = ((USE_PATTERN_DETECT_BIN == USE_PATTERN_DETECT_PATDET) ||
+    assign UNDERFLOW = ((USE_PATTERN_DETECT_BIN == USE_PATTERN_DETECT_PATDET) ||
                             (PREG_BIN == 1'b1)) ?
                             ~pdet_o_mux && ~pdetb_o_mux && underflow_data : 1'bx;
 // DSP_PREADD
