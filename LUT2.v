@@ -1,33 +1,26 @@
+`ifdef verilator3
+`else
+`timescale 1 ps / 1 ps
+`endif
+//
+// LUT2 primitive for Xilinx FPGAs
+// Compatible with Verilator tool (www.veripool.org)
+// Copyright (c) 2019-2022 Frédéric REQUIN
+// License : BSD
+//
 
-`timescale  1 ps / 1 ps
+/* verilator coverage_off */
+module LUT2
+#(
+    parameter [3:0] INIT = 4'b0000
+)
+(
+    input  wire I0, I1,
+    output wire O
+);
+    wire [1:0] _w_idx = { I1, I0 };
 
+    assign O = INIT[_w_idx];
 
-module LUT2 (O, I0, I1);
-
-    parameter INIT = 4'h0;
-
-    input I0, I1;
-
-    output O;
-
-    reg  O;
-    wire [1:0] s;
-
-    assign s = {I1, I0};
-
-    always @(s)
-       if ((s[1]^s[0] ==1) || (s[1]^s[0] ==0))
-           O = INIT[s];
-         else if ((INIT[0] == INIT[1]) && (INIT[2] == INIT[3]) && (INIT[0] == INIT[2])) 
-           O = INIT[0];
-         else if ((s[1] == 0) && (INIT[0] == INIT[1]))
-           O = INIT[0];
-         else if ((s[1] == 1) && (INIT[2] == INIT[3])) 
-           O = INIT[2];
-         else if ((s[0] == 0) && (INIT[0] == INIT[2])) 
-           O = INIT[0];
-         else if ((s[0] == 1) && (INIT[1] == INIT[3]))
-           O = INIT[1];
-         else
-           O = 1'bx;
 endmodule
+/* verilator coverage_on */

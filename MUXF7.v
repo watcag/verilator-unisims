@@ -1,16 +1,23 @@
-`timescale  1 ps / 1 ps
+`ifdef verilator3
+`else
+`timescale 1 ps / 1 ps
+`endif
+//
+// MUXF7 primitive for Xilinx FPGAs
+// Compatible with Verilator tool (www.veripool.org)
+// Copyright (c) 2019-2022 Frédéric REQUIN
+// License : BSD
+//
 
-module MUXF7 (O, I0, I1, S);
+/* verilator coverage_off */
+module MUXF7
+(
+    input  wire I0, I1,
+    input  wire S,
+    output wire O
+);
 
-    output O;
-    reg    O;
+    assign O = (S) ? I1 : I0;
 
-    input  I0, I1, S;
-
-	always @(I0 or I1 or S) 
-	    if (S)
-		O = I1;
-	    else
-		O = I0;
 endmodule
-
+/* verilator coverage_on */

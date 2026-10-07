@@ -1,24 +1,69 @@
-`timescale  1 ps / 1 ps
+`ifdef verilator3
+`else
+`timescale 1 ps / 1 ps
+`endif
+//
+// FDSE primitive for Xilinx FPGAs
+// Compatible with Verilator tool (www.veripool.org)
+// Copyright (c) 2019-2022 Frédéric REQUIN
+// License : BSD
+//
 
-module FDSE (Q, C, CE, D, S);
+/* verilator coverage_off */
+module FDSE
+#(
+    parameter [0:0] IS_C_INVERTED = 1'b0,
+    parameter [0:0] IS_D_INVERTED = 1'b0,
+    parameter [0:0] IS_S_INVERTED = 1'b0,
+    parameter [0:0] INIT          = 1'b1
+)
+(
+    // Clock
+    input  wire C,
+    // Clock enable
+    input  wire CE,
+    // Synchronous set
+    input  wire S,
+    // Data in
+    input  wire D,
+    // Data out
+    output wire Q
+);
+    reg _r_Q;
 
-    parameter INIT = 1'b1;
+    wire _w_D = D ^ IS_D_INVERTED;
+    wire _w_S = S ^ IS_S_INVERTED;
+    
+    initial begin : INIT_STATE
+        _r_Q = INIT[0];
+    end
 
-    output Q;
-
-    input  C, CE, D, S;
-
-    wire Q;
-    reg q_out;
-
-    initial q_out = INIT;
-   
-    assign Q = q_out;
-
-    always @(posedge C )
-	  if (S)
-	     q_out <=  1;
-	  else if (CE)
-	     q_out <=  D;
-
+    generate
+        if (IS_C_INVERTED) begin : GEN_CLK_NEG
+            always @(negedge C) begin
+            
+                if (_w_S) begin
+                    _r_Q <= 1'b1;
+                end
+                else if (CE) begin
+                    _r_Q <= _w_D;
+                end
+            end
+        end
+        else begin : GEN_CLK_POS
+            always @(posedge C) begin
+            
+                if (_w_S) begin
+                    _r_Q <= 1'b1;
+                end
+                else if (CE) begin
+                    _r_Q <= _w_D;
+                end
+            end
+        end
+    endgenerate
+    
+    assign Q = _r_Q;
+    
 endmodule
+/* verilator coverage_on */

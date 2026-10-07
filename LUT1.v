@@ -1,17 +1,24 @@
+`ifdef verilator3
+`else
+`timescale 1 ps / 1 ps
+`endif
+//
+// LUT1 primitive for Xilinx FPGAs
+// Compatible with Verilator tool (www.veripool.org)
+// Copyright (c) 2019-2022 Frédéric REQUIN
+// License : BSD
+//
 
-`timescale  1 ps / 1 ps
-
-
-module LUT1 (O, I0);
-
-    parameter INIT = 2'h0;
-
-    input I0;
-
-    output O;
-    
-    wire O;
-
-    assign O = (INIT[0] == INIT[1]) ? INIT[0] : INIT[I0];
+/* verilator coverage_off */
+module LUT1
+#(
+    parameter [1:0] INIT = 2'b00
+)
+(
+    input  wire I0,
+    output wire O
+);
+    assign O = INIT[I0];
 
 endmodule
+/* verilator coverage_on */
