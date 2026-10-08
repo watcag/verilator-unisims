@@ -9,10 +9,10 @@ designs in Verilator:
     verilator --cc --no-timing -DGLBL -Wno-fatal -y <this directory> --top-module <top> netlist.v
 
 -DGLBL skips the netlist's own glbl module.  Covered: LUT1-6, FDRE, FDSE (with the
-IS_*_INVERTED attributes), CARRY8, MUXF7, MUXF8, SRL16E, SRLC32E, RAM32X1D, RAM32M, RAM32M16,
-RAM64M8, DSP48E2, BUFGCE (as a gate), RAMB18E2/RAMB36E2 (full-width true dual port, written by
-gen_ramb.py) and URAM288 (stand-alone and cascaded).  The block RAM and UltraRAM models stop at
-elaboration on configurations they do not model.
+IS_*_INVERTED attributes), CARRY8, MUXF7, MUXF8, SRL16E, SRLC32E, RAM32X1D, RAM64X1D, RAM32M,
+RAM32M16, RAM64M, RAM64M8, DSP48E2, BUFGCE (as a gate), RAMB18E2/RAMB36E2 (full-width true dual
+port, written by gen_ramb.py) and URAM288 (stand-alone and cascaded).  The block RAM and UltraRAM
+models stop at elaboration on configurations they do not model.
 
 test/netdiff/netdiff.py checks the models against Vivado's unisims on the primitive instances of
 a funcsim netlist (random stimulus, xsim against Verilator, every output every cycle);
@@ -25,5 +25,5 @@ test/netdiff/example/example.tcl writes a small one:
 test/uram288/run.sh checks URAM288 against the unisim in xsim, stand-alone and in 2- and 3-deep
 cascades.
 
-CARRY8, MUXF7, MUXF8, SRLC32E, RAM32M, RAM32M16, RAM64M8, LUT1-6, FDRE and FDSE are from
-fredrequin/verilator_xilinx (BSD license, Copyright (c) 2019-2022 Frederic Requin).
+CARRY8, MUXF7, MUXF8, SRLC32E, RAM32M, RAM32M16, RAM64M, RAM64M8, RAM64X1D, LUT1-6, FDRE and FDSE
+are from fredrequin/verilator_xilinx (BSD license, Copyright (c) 2019-2022 Frederic Requin).
