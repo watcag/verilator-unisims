@@ -154,8 +154,10 @@ module RAMB18E2 #(
 );
 
   initial begin
-    if (READ_WIDTH_A != 18 || READ_WIDTH_B != 18 || WRITE_WIDTH_A != 18 || WRITE_WIDTH_B != 18)
-      $fatal(1, "RAMB18E2 %m: only READ_WIDTH = WRITE_WIDTH = 18 is modelled");
+    // A port Vivado leaves unused has READ_WIDTH = WRITE_WIDTH = 0 (its enables are tied low)
+    if (!((READ_WIDTH_A == 18 && WRITE_WIDTH_A == 18) || (READ_WIDTH_A == 0 && WRITE_WIDTH_A == 0)) ||
+        !((READ_WIDTH_B == 18 && WRITE_WIDTH_B == 18) || (READ_WIDTH_B == 0 && WRITE_WIDTH_B == 0)))
+      $fatal(1, "RAMB18E2 %m: only READ_WIDTH = WRITE_WIDTH = 18 (or 0 on an unused port) is modelled");
     if (CASCADE_ORDER_A != "NONE" || CASCADE_ORDER_B != "NONE" || CLOCK_DOMAINS != "COMMON" || INIT_FILE != "NONE")
       $fatal(1, "RAMB18E2 %m: cascade, INDEPENDENT clocks and INIT_FILE are not modelled");
   end

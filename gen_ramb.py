@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Writes RAMB18E2.v and RAMB36E2.v: compact cycle models of the UltraScale+ block RAMs in true dual
 port mode at the full width (READ_WIDTH = WRITE_WIDTH = 18 or 36), as Vivado infers them for RTL
-memories and xpm_memory.  Other widths, cascade, ECC and INDEPENDENT clocks stop at elaboration.
+memories and xpm_memory; a port Vivado leaves unused (width 0, single-port ROMs) is accepted.  Other
+widths, cascade, ECC and INDEPENDENT clocks stop at elaboration.
 
 Checked against Vivado 2024.2's unisims by test/netdiff (cycle by cycle, X bits of the reference
 not compared).  Collision behaviour with CLOCK_DOMAINS "COMMON", as the unisim gives it:
@@ -64,8 +65,10 @@ def model(name, dw, pw, aw, ninit, ninitp, ports36):
           '  input RSTREGB,', '  input SLEEP,', f'  input [{nb - 1}:0] WEA,', f'  input [{2 * nb - 1}:0] WEBWE']
     body = f'''
   initial begin
-    if (READ_WIDTH_A != {W} || READ_WIDTH_B != {W} || WRITE_WIDTH_A != {W} || WRITE_WIDTH_B != {W})
-      $fatal(1, "{name} %m: only READ_WIDTH = WRITE_WIDTH = {W} is modelled");
+    // A port Vivado leaves unused has READ_WIDTH = WRITE_WIDTH = 0 (its enables are tied low)
+    if (!((READ_WIDTH_A == {W} && WRITE_WIDTH_A == {W}) || (READ_WIDTH_A == 0 && WRITE_WIDTH_A == 0)) ||
+        !((READ_WIDTH_B == {W} && WRITE_WIDTH_B == {W}) || (READ_WIDTH_B == 0 && WRITE_WIDTH_B == 0)))
+      $fatal(1, "{name} %m: only READ_WIDTH = WRITE_WIDTH = {W} (or 0 on an unused port) is modelled");
     if (CASCADE_ORDER_A != "NONE" || CASCADE_ORDER_B != "NONE" || CLOCK_DOMAINS != "COMMON" || INIT_FILE != "NONE")
       $fatal(1, "{name} %m: cascade, INDEPENDENT clocks and INIT_FILE are not modelled");
 {'' if not ports36 else '''    if (EN_ECC_READ != "FALSE" || EN_ECC_WRITE != "FALSE")
