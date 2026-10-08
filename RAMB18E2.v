@@ -158,7 +158,9 @@ module RAMB18E2 #(
     if (!((READ_WIDTH_A == 18 && WRITE_WIDTH_A == 18) || (READ_WIDTH_A == 0 && WRITE_WIDTH_A == 0)) ||
         !((READ_WIDTH_B == 18 && WRITE_WIDTH_B == 18) || (READ_WIDTH_B == 0 && WRITE_WIDTH_B == 0)))
       $fatal(1, "RAMB18E2 %m: only READ_WIDTH = WRITE_WIDTH = 18 (or 0 on an unused port) is modelled");
-    if (CASCADE_ORDER_A != "NONE" || CASCADE_ORDER_B != "NONE" || CLOCK_DOMAINS != "COMMON" || INIT_FILE != "NONE")
+    // the model clocks both ports on CLKARDCLK: INDEPENDENT clocks only with port B unused
+    if (CASCADE_ORDER_A != "NONE" || CASCADE_ORDER_B != "NONE" || INIT_FILE != "NONE" ||
+        (CLOCK_DOMAINS != "COMMON" && (READ_WIDTH_B != 0 || WRITE_WIDTH_B != 0)))
       $fatal(1, "RAMB18E2 %m: cascade, INDEPENDENT clocks and INIT_FILE are not modelled");
   end
 

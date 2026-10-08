@@ -244,7 +244,9 @@ module RAMB36E2 #(
     if (!((READ_WIDTH_A == 36 && WRITE_WIDTH_A == 36) || (READ_WIDTH_A == 0 && WRITE_WIDTH_A == 0)) ||
         !((READ_WIDTH_B == 36 && WRITE_WIDTH_B == 36) || (READ_WIDTH_B == 0 && WRITE_WIDTH_B == 0)))
       $fatal(1, "RAMB36E2 %m: only READ_WIDTH = WRITE_WIDTH = 36 (or 0 on an unused port) is modelled");
-    if (CASCADE_ORDER_A != "NONE" || CASCADE_ORDER_B != "NONE" || CLOCK_DOMAINS != "COMMON" || INIT_FILE != "NONE")
+    // the model clocks both ports on CLKARDCLK: INDEPENDENT clocks only with port B unused
+    if (CASCADE_ORDER_A != "NONE" || CASCADE_ORDER_B != "NONE" || INIT_FILE != "NONE" ||
+        (CLOCK_DOMAINS != "COMMON" && (READ_WIDTH_B != 0 || WRITE_WIDTH_B != 0)))
       $fatal(1, "RAMB36E2 %m: cascade, INDEPENDENT clocks and INIT_FILE are not modelled");
     if (EN_ECC_READ != "FALSE" || EN_ECC_WRITE != "FALSE")
       $fatal(1, "RAMB36E2 %m: ECC is not modelled");
