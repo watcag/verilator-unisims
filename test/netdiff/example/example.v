@@ -1,5 +1,6 @@
 // Small design whose synthesized netlist uses LUTs, FDRE, FDSE, CARRY8, MUXF7/MUXF8, SRLC32E, RAM64M8,
-// DSP48E2, RAMB18E2, RAMB36E2 and URAM288; example.tcl writes its funcsim netlist for netdiff.py.
+// RAM64M, RAM64X1D, DSP48E2, RAMB18E2, RAMB36E2 and URAM288; example.tcl writes its funcsim netlist
+// for netdiff.py.
 module example (
   input             clk,
   input      [47:0] a, b,
@@ -21,6 +22,10 @@ module example (
   input             we_c, we_d,
   input      [9:0]  addr_c, addr_d,
   input      [17:0] din_c, din_d,
+  input             mwe, nwe,
+  input      [5:0]  maddr, mraddr, naddr, nraddr,
+  input      [2:0]  mdin,
+  input             ndin,
   output reg [47:0] sum,
   output reg [44:0] prod,
   output reg        bit_o,
@@ -29,7 +34,9 @@ module example (
   output reg [71:0] udout,
   output reg [7:0]  cnt,
   output     [6:0]  ldout,
-  output reg [17:0] dout_c, dout_d
+  output reg [17:0] dout_c, dout_d,
+  output     [2:0]  mdout,
+  output            ndout
 );
   always @(posedge clk) sum <= a + b;
 
@@ -61,4 +68,13 @@ module example (
   (* ram_style = "block" *) reg [17:0] bram18 [0:1023];
   always @(posedge clk) begin dout_c <= bram18[addr_c]; if (we_c) bram18[addr_c] <= din_c; end
   always @(posedge clk) begin dout_d <= bram18[addr_d]; if (we_d) bram18[addr_d] <= din_d; end
+
+  (* ram_style = "distributed" *) reg [2:0] mram [0:63];
+  (* ram_style = "distributed" *) reg nram [0:63];
+  integer k;
+  initial for (k = 0; k < 64; k = k + 1) begin mram[k] = k * 5; nram[k] = k % 5 == 1; end
+  always @(posedge clk) if (mwe) mram[maddr] <= mdin;
+  assign mdout = mram[mraddr];
+  always @(posedge clk) if (nwe) nram[naddr] <= ndin;
+  assign ndout = nram[nraddr];
 endmodule

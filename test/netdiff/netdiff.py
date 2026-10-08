@@ -57,7 +57,7 @@ def is_const(v):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('netlist'); ap.add_argument('work')
-    ap.add_argument('--prims', default='CARRY8,MUXF7,MUXF8,SRL16E,SRLC32E,RAM32M,RAM32M16,RAM64M8,RAM32X1D,'
+    ap.add_argument('--prims', default='CARRY8,MUXF7,MUXF8,SRL16E,SRLC32E,RAM32M,RAM32M16,RAM64M,RAM64M8,RAM32X1D,RAM64X1D,'
                     'RAMB18E2,RAMB36E2,DSP48E2,URAM288,FDRE,FDSE,LUT1,LUT2,LUT3,LUT4,LUT5,LUT6')
     ap.add_argument('--per', type=int, default=4); ap.add_argument('--cycles', type=int, default=4000)
     ap.add_argument('--pool', type=int, default=4, help='values per address input (0: any)')
