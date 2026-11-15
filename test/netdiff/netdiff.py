@@ -96,7 +96,7 @@ def main():
     tb += [f'  reg [{nin - 1}:0] stim [0:{a.cycles - 1}];', '  integer cyc = 0, fo;',
            '  initial begin $readmemh("stim.hex", stim); fo = $fopen("out.txt", "w"); end',
            '  always @(posedge clk) begin',
-           '    $fdisplay(fo, "%0d %h", cyc, {' + ', '.join(n for n, _ in outs) + '});',
+           '    $fdisplay(fo, "%0d %b", cyc, {' + ', '.join(n for n, _ in outs) + '});',
            '    {' + ', '.join(n for n, _ in ins) + '} <= stim[cyc];',
            f'    cyc <= cyc + 1; if (cyc == {a.cycles - 1}) begin $fclose(fo); $finish; end',
            '  end', 'endmodule']
@@ -136,9 +136,9 @@ def main():
     for r, g in zip(ref, got):
         if r == g or not r:
             continue
-        cyc, rs = r.split(); gv = int(g.split()[1], 16)
-        rv = int(re.sub('[xXzZ]', '0', rs), 16)
-        known = int(''.join('0' if ch in 'xXzZ' else 'f' for ch in rs), 16)   # X/Z nibbles of the reference: any value
+        cyc, rs = r.split(); gv = int(g.split()[1], 2)
+        rv = int(re.sub('[xXzZ]', '0', rs), 2)
+        known = int(''.join('0' if ch in 'xXzZ' else '1' for ch in rs), 2)   # X/Z bits of the reference: any value
         sh = nout
         for n, w in zip(names, widths):
             sh -= w

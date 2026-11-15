@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Writes RAMB18E2.v and RAMB36E2.v: compact cycle models of the UltraScale+ block RAMs in true dual
-port mode at the full width (READ_WIDTH = WRITE_WIDTH = 18 or 36), as Vivado infers them for RTL
-memories and xpm_memory; a port Vivado leaves unused (width 0, single-port ROMs) is accepted, and with port B unused
-so are INDEPENDENT clocks.  Other
-widths, cascade, ECC and INDEPENDENT clocks stop at elaboration.
+port mode, each port at one width (READ_WIDTH = WRITE_WIDTH = 1, 2, 4, 9, 18 or, RAMB36E2, 36; the
+two ports may differ), as Vivado infers them for RTL memories, ROMs and xpm_memory; a port Vivado leaves
+unused (width 0, single-port ROMs) is accepted, and with port B unused so are INDEPENDENT clocks.  Different
+read and write widths on one port, cascade, ECC and INDEPENDENT clocks stop at elaboration.
 
 Checked against Vivado 2024.2's unisims by test/netdiff (cycle by cycle, X bits of the reference
 not compared).  Collision behaviour with CLOCK_DOMAINS "COMMON", as the unisim gives it:
@@ -64,62 +64,115 @@ def model(name, dw, pw, aw, ninit, ninitp, ports36):
         i += ['  input INJECTDBITERR,', '  input INJECTSBITERR,']
     i += ['  input REGCEAREGCE,', '  input REGCEB,', '  input RSTRAMARSTRAM,', '  input RSTRAMB,', '  input RSTREGARSTREG,',
           '  input RSTREGB,', '  input SLEEP,', f'  input [{nb - 1}:0] WEA,', f'  input [{2 * nb - 1}:0] WEBWE']
+    widths = '0, 1, 2, 4, 9, 18' + (', 36' if ports36 else '')
+    legal = lambda port: ' || '.join(f'READ_WIDTH_{port} == {w}' for w in widths.split(', '))
+    ecc = '' if not ports36 else ('    if (EN_ECC_READ != "FALSE" || EN_ECC_WRITE != "FALSE")\n'
+                                  '      $fatal(1, "RAMB36E2 %m: ECC is not modelled");\n')
     body = f'''
   initial begin
-    // A port Vivado leaves unused has READ_WIDTH = WRITE_WIDTH = 0 (its enables are tied low)
-    if (!((READ_WIDTH_A == {W} && WRITE_WIDTH_A == {W}) || (READ_WIDTH_A == 0 && WRITE_WIDTH_A == 0)) ||
-        !((READ_WIDTH_B == {W} && WRITE_WIDTH_B == {W}) || (READ_WIDTH_B == 0 && WRITE_WIDTH_B == 0)))
-      $fatal(1, "{name} %m: only READ_WIDTH = WRITE_WIDTH = {W} (or 0 on an unused port) is modelled");
+    // Each port reads and writes one width (READ_WIDTH = WRITE_WIDTH in {{{widths}}}); a port Vivado leaves
+    // unused has width 0 (its enables are tied low).  The two ports may differ in width.
+    if (READ_WIDTH_A != WRITE_WIDTH_A || !({legal('A')}) ||
+        READ_WIDTH_B != WRITE_WIDTH_B || !({legal('B')}))
+      $fatal(1, "{name} %m: only READ_WIDTH = WRITE_WIDTH in {{{widths}}} on each port is modelled");
     // the model clocks both ports on CLKARDCLK: INDEPENDENT clocks only with port B unused
     if (CASCADE_ORDER_A != "NONE" || CASCADE_ORDER_B != "NONE" || INIT_FILE != "NONE" ||
         (CLOCK_DOMAINS != "COMMON" && (READ_WIDTH_B != 0 || WRITE_WIDTH_B != 0)))
       $fatal(1, "{name} %m: cascade, INDEPENDENT clocks and INIT_FILE are not modelled");
-{'' if not ports36 else '''    if (EN_ECC_READ != "FALSE" || EN_ECC_WRITE != "FALSE")
-      $fatal(1, "RAMB36E2 %m: ECC is not modelled");
-'''}  end
+{ecc}  end
 
-  // {1 << 10} words of {dw} data + {pw} parity bits; word w is INIT bits [{dw}w+{dw - 1}:{dw}w], INITP bits [{pw}w+{pw - 1}:{pw}w]
+  // {1 << 10} words of {dw} data + {pw} parity bits; word w is INIT bits [{dw}w+{dw - 1}:{dw}w], INITP bits [{pw}w+{pw - 1}:{pw}w].
+  // A port of width P < {W} addresses a slice of a word: P >= 9 has P/9 byte lanes (8 data + 1 parity bit
+  // each), P < 9 has P data bits and no parity.  ADDR[{aw - 1}:{lo}] selects the word, the next log2(slices per
+  // word) address bits below it the slice; the port's data and parity are the low bits of DIN/DINP and DOUT/DOUTP.
   reg [{W - 1}:0] mem [0:1023];
   wire [{256 * ninit - 1}:0] init = {{{', '.join(f'INIT_{k:02X}' for k in reversed(range(ninit)))}}};
   wire [{256 * ninitp - 1}:0] initp = {{{', '.join(f'INITP_{k:02X}' for k in reversed(range(ninitp)))}}};
   integer k;
   initial for (k = 0; k < 1024; k = k + 1) mem[k] = {{initp[{pw}*k +: {pw}], init[{dw}*k +: {dw}]}};
 
-  function automatic [{W - 1}:0] bytes(input [{nb - 1}:0] we);   // lane i: data [8i+7:8i] and parity bit i
+  localparam integer PD_A = READ_WIDTH_A >= 9 ? READ_WIDTH_A / 9 * 8 : READ_WIDTH_A == 0 ? {dw} : READ_WIDTH_A;
+  localparam integer PD_B = READ_WIDTH_B >= 9 ? READ_WIDTH_B / 9 * 8 : READ_WIDTH_B == 0 ? {dw} : READ_WIDTH_B;
+  localparam integer PP_A = READ_WIDTH_A >= 9 ? READ_WIDTH_A / 9 : READ_WIDTH_A == 0 ? {pw} : 0;
+  localparam integer PP_B = READ_WIDTH_B >= 9 ? READ_WIDTH_B / 9 : READ_WIDTH_B == 0 ? {pw} : 0;
+  localparam integer SB_A = $clog2({dw} / PD_A), SB_B = $clog2({dw} / PD_B);   // slice-select address bits
+
+  // word mask of slice s for a port of PD data and PP parity bits; we: byte-lane enables (P >= 9), bit 0 (P < 9)
+  function automatic [{W - 1}:0] slice(input integer pd, input integer pp, input integer s, input [{nb - 1}:0] we);
     integer b;
-    bytes = 0;
-    for (b = 0; b < {nb}; b = b + 1) if (we[b]) begin bytes[8 * b +: 8] = 8'hff; bytes[{dw} + b] = 1'b1; end
+    slice = 0;
+    if (pp == 0) begin
+      if (we[0]) for (b = 0; b < pd; b = b + 1) slice[s * pd + b] = 1'b1;
+    end else
+      for (b = 0; b < pp; b = b + 1) if (we[b]) begin slice[s * pd + 8 * b +: 8] = 8'hff; slice[{dw} + s * pp + b] = 1'b1; end
+  endfunction
+  // the port's {{DINP, DIN}} (low PP parity and PD data bits) placed at slice s of a word
+  function automatic [{W - 1}:0] place(input integer pd, input integer pp, input integer s, input [{W - 1}:0] d);
+    integer b;
+    place = 0;
+    for (b = 0; b < pd; b = b + 1) place[s * pd + b] = d[b];
+    for (b = 0; b < pp; b = b + 1) place[{dw} + s * pp + b] = d[{dw} + b];
+  endfunction
+  // slice s of a word, returned in the low PD data and PP parity bits
+  function automatic [{W - 1}:0] pick(input integer pd, input integer pp, input integer s, input [{W - 1}:0] w);
+    integer b;
+    pick = 0;
+    for (b = 0; b < pd; b = b + 1) pick[b] = w[s * pd + b];
+    for (b = 0; b < pp; b = b + 1) pick[{dw} + b] = w[{dw} + s * pp + b];
+  endfunction
+  // INIT_A/B and SRVAL_A/B of a port of width P hold {{parity, data}} packed in their low P bits
+  function automatic [{W - 1}:0] unpack(input integer pd, input integer pp, input [{W - 1}:0] v);
+    integer b;
+    unpack = 0;
+    for (b = 0; b < pd; b = b + 1) unpack[b] = v[b];
+    for (b = 0; b < pp; b = b + 1) unpack[{dw} + b] = v[pd + b];
+  endfunction
+  // the output bits a port of PD data and PP parity bits drives (the others keep their value)
+  function automatic [{W - 1}:0] outm(input integer pd, input integer pp);
+    integer b;
+    outm = 0;
+    for (b = 0; b < pd; b = b + 1) outm[b] = 1'b1;
+    for (b = 0; b < pp; b = b + 1) outm[{dw} + b] = 1'b1;
   endfunction
 
   wire en_a = ENARDEN ^ IS_ENARDEN_INVERTED, en_b = ENBWREN ^ IS_ENBWREN_INVERTED;
   wire rstram_a = RSTRAMARSTRAM ^ IS_RSTRAMARSTRAM_INVERTED, rstram_b = RSTRAMB ^ IS_RSTRAMB_INVERTED;
   wire rstreg_a = RSTREGARSTREG ^ IS_RSTREGARSTREG_INVERTED, rstreg_b = RSTREGB ^ IS_RSTREGB_INVERTED;
   wire [9:0] ad_a = ADDRARDADDR[{aw - 1}:{lo}], ad_b = ADDRBWRADDR[{aw - 1}:{lo}];
-  wire [{W - 1}:0] m_a = en_a ? bytes(WEA) : {W}'h0, m_b = en_b ? bytes(WEBWE[{nb - 1}:0]) : {W}'h0;
-  wire [{W - 1}:0] d_a = {{DINPADINP, DINADIN}}, d_b = {{DINPBDINP, DINBDIN}};
+  wire [31:0] lo_a = {{{32 - lo}'d0, ADDRARDADDR[{lo - 1}:0]}}, lo_b = {{{32 - lo}'d0, ADDRBWRADDR[{lo - 1}:0]}};
+  wire [31:0] s_a = SB_A == 0 ? 0 : lo_a >> ({lo} - SB_A), s_b = SB_B == 0 ? 0 : lo_b >> ({lo} - SB_B);
+  wire [{W - 1}:0] om_a = outm(PD_A, PP_A), om_b = outm(PD_B, PP_B);
+  wire [{W - 1}:0] m_a = en_a ? slice(PD_A, PP_A, s_a, WEA) : {W}'h0, m_b = en_b ? slice(PD_B, PP_B, s_b, WEBWE[{nb - 1}:0]) : {W}'h0;
+  wire [{W - 1}:0] d_a = place(PD_A, PP_A, s_a, {{DINPADINP, DINADIN}}), d_b = place(PD_B, PP_B, s_b, {{DINPBDINP, DINBDIN}});
   wire [{W - 1}:0] old_a = mem[ad_a], old_b = mem[ad_b];
   wire [{W - 1}:0] new_a = d_a & m_a | old_a & ~m_a, new_b = d_b & m_b | old_b & ~m_b;
-  wire both = |m_a && |m_b && ad_a == ad_b;                     // port A's bytes win
-  reg [{W - 1}:0] lat_a = INIT_A, lat_b = INIT_B, reg_a = INIT_A, reg_b = INIT_B;
+  // A write cycle is any enabled lane (as the unisim's mem_wr_en), even when that lane's bits lie outside a
+  // narrow port's word (a x9 or narrower port writes with lane 0 alone): it decides the write-mode read.
+  wire wr_a = en_a && |WEA, wr_b = en_b && |WEBWE[{nb - 1}:0];
+  wire both = |m_a && |m_b && ad_a == ad_b;                     // port A's bits win
+  wire [{W - 1}:0] new_ab = both ? new_a & m_a | new_b & ~m_a : new_b;
+  localparam [{W - 1}:0] IA = unpack(PD_A, PP_A, INIT_A), IB = unpack(PD_B, PP_B, INIT_B);
+  localparam [{W - 1}:0] SA = unpack(PD_A, PP_A, SRVAL_A), SB = unpack(PD_B, PP_B, SRVAL_B);
+  reg [{W - 1}:0] lat_a = IA, lat_b = IB, reg_a = IA, reg_b = IB;
 
   always @(posedge CLKARDCLK) begin
     if (en_a) begin
-      if (rstram_a) lat_a <= SRVAL_A;
-      else if (!(|m_a)) lat_a <= old_a;
-      else if (WRITE_MODE_A == "WRITE_FIRST") lat_a <= new_a;
-      else if (WRITE_MODE_A == "READ_FIRST") lat_a <= old_a;
+      if (rstram_a) lat_a <= SA;
+      else if (!wr_a) lat_a <= lat_a & ~om_a | pick(PD_A, PP_A, s_a, old_a);
+      else if (WRITE_MODE_A == "WRITE_FIRST") lat_a <= lat_a & ~om_a | pick(PD_A, PP_A, s_a, new_a);
+      else if (WRITE_MODE_A == "READ_FIRST") lat_a <= lat_a & ~om_a | pick(PD_A, PP_A, s_a, old_a);
     end
-    if (rstreg_a && (RSTREG_PRIORITY_A == "RSTREG" || REGCEAREGCE)) reg_a <= SRVAL_A;
+    if (rstreg_a && (RSTREG_PRIORITY_A == "RSTREG" || REGCEAREGCE)) reg_a <= SA;
     else if (REGCEAREGCE) reg_a <= lat_a;
     if (en_b) begin
-      if (rstram_b) lat_b <= SRVAL_B;
-      else if (!(|m_b)) lat_b <= old_b;
-      else if (WRITE_MODE_B == "WRITE_FIRST") lat_b <= both ? new_a & m_a | new_b & ~m_a : new_b;
-      else if (WRITE_MODE_B == "READ_FIRST") lat_b <= old_b;
+      if (rstram_b) lat_b <= SB;
+      else if (!wr_b) lat_b <= lat_b & ~om_b | pick(PD_B, PP_B, s_b, old_b);
+      else if (WRITE_MODE_B == "WRITE_FIRST") lat_b <= lat_b & ~om_b | pick(PD_B, PP_B, s_b, new_ab);
+      else if (WRITE_MODE_B == "READ_FIRST") lat_b <= lat_b & ~om_b | pick(PD_B, PP_B, s_b, old_b);
     end
-    if (rstreg_b && (RSTREG_PRIORITY_B == "RSTREG" || REGCEB)) reg_b <= SRVAL_B;
+    if (rstreg_b && (RSTREG_PRIORITY_B == "RSTREG" || REGCEB)) reg_b <= SB;
     else if (REGCEB) reg_b <= lat_b;
-    if (|m_b) mem[ad_b] <= both ? new_a & m_a | new_b & ~m_a : new_b;
+    if (|m_b) mem[ad_b] <= new_ab;
     if (|m_a && !both) mem[ad_a] <= new_a;
   end
 

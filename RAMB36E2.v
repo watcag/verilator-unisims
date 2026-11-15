@@ -240,10 +240,11 @@ module RAMB36E2 #(
 );
 
   initial begin
-    // A port Vivado leaves unused has READ_WIDTH = WRITE_WIDTH = 0 (its enables are tied low)
-    if (!((READ_WIDTH_A == 36 && WRITE_WIDTH_A == 36) || (READ_WIDTH_A == 0 && WRITE_WIDTH_A == 0)) ||
-        !((READ_WIDTH_B == 36 && WRITE_WIDTH_B == 36) || (READ_WIDTH_B == 0 && WRITE_WIDTH_B == 0)))
-      $fatal(1, "RAMB36E2 %m: only READ_WIDTH = WRITE_WIDTH = 36 (or 0 on an unused port) is modelled");
+    // Each port reads and writes one width (READ_WIDTH = WRITE_WIDTH in {0, 1, 2, 4, 9, 18, 36}); a port Vivado leaves
+    // unused has width 0 (its enables are tied low).  The two ports may differ in width.
+    if (READ_WIDTH_A != WRITE_WIDTH_A || !(READ_WIDTH_A == 0 || READ_WIDTH_A == 1 || READ_WIDTH_A == 2 || READ_WIDTH_A == 4 || READ_WIDTH_A == 9 || READ_WIDTH_A == 18 || READ_WIDTH_A == 36) ||
+        READ_WIDTH_B != WRITE_WIDTH_B || !(READ_WIDTH_B == 0 || READ_WIDTH_B == 1 || READ_WIDTH_B == 2 || READ_WIDTH_B == 4 || READ_WIDTH_B == 9 || READ_WIDTH_B == 18 || READ_WIDTH_B == 36))
+      $fatal(1, "RAMB36E2 %m: only READ_WIDTH = WRITE_WIDTH in {0, 1, 2, 4, 9, 18, 36} on each port is modelled");
     // the model clocks both ports on CLKARDCLK: INDEPENDENT clocks only with port B unused
     if (CASCADE_ORDER_A != "NONE" || CASCADE_ORDER_B != "NONE" || INIT_FILE != "NONE" ||
         (CLOCK_DOMAINS != "COMMON" && (READ_WIDTH_B != 0 || WRITE_WIDTH_B != 0)))
@@ -252,48 +253,98 @@ module RAMB36E2 #(
       $fatal(1, "RAMB36E2 %m: ECC is not modelled");
   end
 
-  // 1024 words of 32 data + 4 parity bits; word w is INIT bits [32w+31:32w], INITP bits [4w+3:4w]
+  // 1024 words of 32 data + 4 parity bits; word w is INIT bits [32w+31:32w], INITP bits [4w+3:4w].
+  // A port of width P < 36 addresses a slice of a word: P >= 9 has P/9 byte lanes (8 data + 1 parity bit
+  // each), P < 9 has P data bits and no parity.  ADDR[14:5] selects the word, the next log2(slices per
+  // word) address bits below it the slice; the port's data and parity are the low bits of DIN/DINP and DOUT/DOUTP.
   reg [35:0] mem [0:1023];
   wire [32767:0] init = {INIT_7F, INIT_7E, INIT_7D, INIT_7C, INIT_7B, INIT_7A, INIT_79, INIT_78, INIT_77, INIT_76, INIT_75, INIT_74, INIT_73, INIT_72, INIT_71, INIT_70, INIT_6F, INIT_6E, INIT_6D, INIT_6C, INIT_6B, INIT_6A, INIT_69, INIT_68, INIT_67, INIT_66, INIT_65, INIT_64, INIT_63, INIT_62, INIT_61, INIT_60, INIT_5F, INIT_5E, INIT_5D, INIT_5C, INIT_5B, INIT_5A, INIT_59, INIT_58, INIT_57, INIT_56, INIT_55, INIT_54, INIT_53, INIT_52, INIT_51, INIT_50, INIT_4F, INIT_4E, INIT_4D, INIT_4C, INIT_4B, INIT_4A, INIT_49, INIT_48, INIT_47, INIT_46, INIT_45, INIT_44, INIT_43, INIT_42, INIT_41, INIT_40, INIT_3F, INIT_3E, INIT_3D, INIT_3C, INIT_3B, INIT_3A, INIT_39, INIT_38, INIT_37, INIT_36, INIT_35, INIT_34, INIT_33, INIT_32, INIT_31, INIT_30, INIT_2F, INIT_2E, INIT_2D, INIT_2C, INIT_2B, INIT_2A, INIT_29, INIT_28, INIT_27, INIT_26, INIT_25, INIT_24, INIT_23, INIT_22, INIT_21, INIT_20, INIT_1F, INIT_1E, INIT_1D, INIT_1C, INIT_1B, INIT_1A, INIT_19, INIT_18, INIT_17, INIT_16, INIT_15, INIT_14, INIT_13, INIT_12, INIT_11, INIT_10, INIT_0F, INIT_0E, INIT_0D, INIT_0C, INIT_0B, INIT_0A, INIT_09, INIT_08, INIT_07, INIT_06, INIT_05, INIT_04, INIT_03, INIT_02, INIT_01, INIT_00};
   wire [4095:0] initp = {INITP_0F, INITP_0E, INITP_0D, INITP_0C, INITP_0B, INITP_0A, INITP_09, INITP_08, INITP_07, INITP_06, INITP_05, INITP_04, INITP_03, INITP_02, INITP_01, INITP_00};
   integer k;
   initial for (k = 0; k < 1024; k = k + 1) mem[k] = {initp[4*k +: 4], init[32*k +: 32]};
 
-  function automatic [35:0] bytes(input [3:0] we);   // lane i: data [8i+7:8i] and parity bit i
+  localparam integer PD_A = READ_WIDTH_A >= 9 ? READ_WIDTH_A / 9 * 8 : READ_WIDTH_A == 0 ? 32 : READ_WIDTH_A;
+  localparam integer PD_B = READ_WIDTH_B >= 9 ? READ_WIDTH_B / 9 * 8 : READ_WIDTH_B == 0 ? 32 : READ_WIDTH_B;
+  localparam integer PP_A = READ_WIDTH_A >= 9 ? READ_WIDTH_A / 9 : READ_WIDTH_A == 0 ? 4 : 0;
+  localparam integer PP_B = READ_WIDTH_B >= 9 ? READ_WIDTH_B / 9 : READ_WIDTH_B == 0 ? 4 : 0;
+  localparam integer SB_A = $clog2(32 / PD_A), SB_B = $clog2(32 / PD_B);   // slice-select address bits
+
+  // word mask of slice s for a port of PD data and PP parity bits; we: byte-lane enables (P >= 9), bit 0 (P < 9)
+  function automatic [35:0] slice(input integer pd, input integer pp, input integer s, input [3:0] we);
     integer b;
-    bytes = 0;
-    for (b = 0; b < 4; b = b + 1) if (we[b]) begin bytes[8 * b +: 8] = 8'hff; bytes[32 + b] = 1'b1; end
+    slice = 0;
+    if (pp == 0) begin
+      if (we[0]) for (b = 0; b < pd; b = b + 1) slice[s * pd + b] = 1'b1;
+    end else
+      for (b = 0; b < pp; b = b + 1) if (we[b]) begin slice[s * pd + 8 * b +: 8] = 8'hff; slice[32 + s * pp + b] = 1'b1; end
+  endfunction
+  // the port's {DINP, DIN} (low PP parity and PD data bits) placed at slice s of a word
+  function automatic [35:0] place(input integer pd, input integer pp, input integer s, input [35:0] d);
+    integer b;
+    place = 0;
+    for (b = 0; b < pd; b = b + 1) place[s * pd + b] = d[b];
+    for (b = 0; b < pp; b = b + 1) place[32 + s * pp + b] = d[32 + b];
+  endfunction
+  // slice s of a word, returned in the low PD data and PP parity bits
+  function automatic [35:0] pick(input integer pd, input integer pp, input integer s, input [35:0] w);
+    integer b;
+    pick = 0;
+    for (b = 0; b < pd; b = b + 1) pick[b] = w[s * pd + b];
+    for (b = 0; b < pp; b = b + 1) pick[32 + b] = w[32 + s * pp + b];
+  endfunction
+  // INIT_A/B and SRVAL_A/B of a port of width P hold {parity, data} packed in their low P bits
+  function automatic [35:0] unpack(input integer pd, input integer pp, input [35:0] v);
+    integer b;
+    unpack = 0;
+    for (b = 0; b < pd; b = b + 1) unpack[b] = v[b];
+    for (b = 0; b < pp; b = b + 1) unpack[32 + b] = v[pd + b];
+  endfunction
+  // the output bits a port of PD data and PP parity bits drives (the others keep their value)
+  function automatic [35:0] outm(input integer pd, input integer pp);
+    integer b;
+    outm = 0;
+    for (b = 0; b < pd; b = b + 1) outm[b] = 1'b1;
+    for (b = 0; b < pp; b = b + 1) outm[32 + b] = 1'b1;
   endfunction
 
   wire en_a = ENARDEN ^ IS_ENARDEN_INVERTED, en_b = ENBWREN ^ IS_ENBWREN_INVERTED;
   wire rstram_a = RSTRAMARSTRAM ^ IS_RSTRAMARSTRAM_INVERTED, rstram_b = RSTRAMB ^ IS_RSTRAMB_INVERTED;
   wire rstreg_a = RSTREGARSTREG ^ IS_RSTREGARSTREG_INVERTED, rstreg_b = RSTREGB ^ IS_RSTREGB_INVERTED;
   wire [9:0] ad_a = ADDRARDADDR[14:5], ad_b = ADDRBWRADDR[14:5];
-  wire [35:0] m_a = en_a ? bytes(WEA) : 36'h0, m_b = en_b ? bytes(WEBWE[3:0]) : 36'h0;
-  wire [35:0] d_a = {DINPADINP, DINADIN}, d_b = {DINPBDINP, DINBDIN};
+  wire [31:0] lo_a = {27'd0, ADDRARDADDR[4:0]}, lo_b = {27'd0, ADDRBWRADDR[4:0]};
+  wire [31:0] s_a = SB_A == 0 ? 0 : lo_a >> (5 - SB_A), s_b = SB_B == 0 ? 0 : lo_b >> (5 - SB_B);
+  wire [35:0] om_a = outm(PD_A, PP_A), om_b = outm(PD_B, PP_B);
+  wire [35:0] m_a = en_a ? slice(PD_A, PP_A, s_a, WEA) : 36'h0, m_b = en_b ? slice(PD_B, PP_B, s_b, WEBWE[3:0]) : 36'h0;
+  wire [35:0] d_a = place(PD_A, PP_A, s_a, {DINPADINP, DINADIN}), d_b = place(PD_B, PP_B, s_b, {DINPBDINP, DINBDIN});
   wire [35:0] old_a = mem[ad_a], old_b = mem[ad_b];
   wire [35:0] new_a = d_a & m_a | old_a & ~m_a, new_b = d_b & m_b | old_b & ~m_b;
-  wire both = |m_a && |m_b && ad_a == ad_b;                     // port A's bytes win
-  reg [35:0] lat_a = INIT_A, lat_b = INIT_B, reg_a = INIT_A, reg_b = INIT_B;
+  // A write cycle is any enabled lane (as the unisim's mem_wr_en), even when that lane's bits lie outside a
+  // narrow port's word (a x9 or narrower port writes with lane 0 alone): it decides the write-mode read.
+  wire wr_a = en_a && |WEA, wr_b = en_b && |WEBWE[3:0];
+  wire both = |m_a && |m_b && ad_a == ad_b;                     // port A's bits win
+  wire [35:0] new_ab = both ? new_a & m_a | new_b & ~m_a : new_b;
+  localparam [35:0] IA = unpack(PD_A, PP_A, INIT_A), IB = unpack(PD_B, PP_B, INIT_B);
+  localparam [35:0] SA = unpack(PD_A, PP_A, SRVAL_A), SB = unpack(PD_B, PP_B, SRVAL_B);
+  reg [35:0] lat_a = IA, lat_b = IB, reg_a = IA, reg_b = IB;
 
   always @(posedge CLKARDCLK) begin
     if (en_a) begin
-      if (rstram_a) lat_a <= SRVAL_A;
-      else if (!(|m_a)) lat_a <= old_a;
-      else if (WRITE_MODE_A == "WRITE_FIRST") lat_a <= new_a;
-      else if (WRITE_MODE_A == "READ_FIRST") lat_a <= old_a;
+      if (rstram_a) lat_a <= SA;
+      else if (!wr_a) lat_a <= lat_a & ~om_a | pick(PD_A, PP_A, s_a, old_a);
+      else if (WRITE_MODE_A == "WRITE_FIRST") lat_a <= lat_a & ~om_a | pick(PD_A, PP_A, s_a, new_a);
+      else if (WRITE_MODE_A == "READ_FIRST") lat_a <= lat_a & ~om_a | pick(PD_A, PP_A, s_a, old_a);
     end
-    if (rstreg_a && (RSTREG_PRIORITY_A == "RSTREG" || REGCEAREGCE)) reg_a <= SRVAL_A;
+    if (rstreg_a && (RSTREG_PRIORITY_A == "RSTREG" || REGCEAREGCE)) reg_a <= SA;
     else if (REGCEAREGCE) reg_a <= lat_a;
     if (en_b) begin
-      if (rstram_b) lat_b <= SRVAL_B;
-      else if (!(|m_b)) lat_b <= old_b;
-      else if (WRITE_MODE_B == "WRITE_FIRST") lat_b <= both ? new_a & m_a | new_b & ~m_a : new_b;
-      else if (WRITE_MODE_B == "READ_FIRST") lat_b <= old_b;
+      if (rstram_b) lat_b <= SB;
+      else if (!wr_b) lat_b <= lat_b & ~om_b | pick(PD_B, PP_B, s_b, old_b);
+      else if (WRITE_MODE_B == "WRITE_FIRST") lat_b <= lat_b & ~om_b | pick(PD_B, PP_B, s_b, new_ab);
+      else if (WRITE_MODE_B == "READ_FIRST") lat_b <= lat_b & ~om_b | pick(PD_B, PP_B, s_b, old_b);
     end
-    if (rstreg_b && (RSTREG_PRIORITY_B == "RSTREG" || REGCEB)) reg_b <= SRVAL_B;
+    if (rstreg_b && (RSTREG_PRIORITY_B == "RSTREG" || REGCEB)) reg_b <= SB;
     else if (REGCEB) reg_b <= lat_b;
-    if (|m_b) mem[ad_b] <= both ? new_a & m_a | new_b & ~m_a : new_b;
+    if (|m_b) mem[ad_b] <= new_ab;
     if (|m_a && !both) mem[ad_a] <= new_a;
   end
 
